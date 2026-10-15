@@ -1,16 +1,19 @@
 import streamlit as st
 import math
-from datetime import datetime
+import os
+from datetime import datetime, timezone, timedelta
 from fpdf import FPDF
 
 # ==========================================
 # 1. CONFIGURACIÓN DE LA PÁGINA
 # ==========================================
 st.set_page_config(
-    page_title="Tamizaje de Riesgo Cardiovascular - Res. 3280",
+    page_title="Tamizaje RCV - E.S.E. Hospital San Joaquín",
     page_icon="❤️",
     layout="wide"
 )
+
+LOGO_PATH = "logo.png"
 
 # ==========================================
 # 2. MOTOR DE CÁLCULO NORMATIVO (RES. 3280)
@@ -147,7 +150,7 @@ def calcular_riesgo_colombia(d: dict) -> dict:
     }
 
 # ==========================================
-# 3. GENERADOR DE REPORTE PDF INDIVIDUAL
+# 3. GENERADOR DE REPORTE PDF CON LOGO
 # ==========================================
 def texto_seguro(texto: str) -> str:
     return str(texto).encode("latin-1", "replace").decode("latin-1")
@@ -157,15 +160,35 @@ def generar_pdf_paciente(d: dict, r: dict) -> bytes:
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # --- ENCABEZADO ---
+    # --- ENCABEZADO INSTITUCIONAL CON ESCUDO ---
+    # Fondo azul institucional (de x=10 a x=200, alto 24 mm)
     pdf.set_fill_color(20, 65, 115)
+    pdf.rect(10, 10, 190, 24, "F")
+
+    if os.path.exists(LOGO_PATH):
+        # Recuadro blanco para que el escudo resalte limpio
+        pdf.set_fill_color(255, 255, 255)
+        pdf.rect(12, 11.5, 21, 21, "F")
+        pdf.image(LOGO_PATH, x=13, y=12, w=19, h=19)
+        x_texto = 35
+    else:
+        x_texto = 10
+
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 10, texto_seguro("REPORTE DE TAMIZAJE DE RIESGO CARDIOVASCULAR Y METABÓLICO"), ln=True, align="C", fill=True)
-    
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 6, texto_seguro("Basado en la Resolución 3280 de 2018 (RIAS) - Ministerio de Salud y Protección Social de Colombia"), ln=True, align="C", fill=True)
-    pdf.ln(4)
+    pdf.set_xy(x_texto, 12)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(200 - x_texto, 6, texto_seguro("E.S.E. HOSPITAL SAN JOAQUÍN - NARIÑO, ANTIOQUIA"), ln=True, align="C")
+
+    pdf.set_x(x_texto)
+    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.cell(200 - x_texto, 6, texto_seguro("REPORTE DE TAMIZAJE DE RIESGO CARDIOVASCULAR Y METABÓLICO"), ln=True, align="C")
+
+    pdf.set_x(x_texto)
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.cell(200 - x_texto, 5, texto_seguro("Basado en la Resolución 3280 de 2018 (RIAS) - Ministerio de Salud y Protección Social de Colombia"), ln=True, align="C")
+
+    # Ubicar cursor debajo del banner
+    pdf.set_y(38)
 
     # --- 1. DATOS DEL PACIENTE ---
     pdf.set_text_color(0, 0, 0)
@@ -285,9 +308,10 @@ def generar_pdf_paciente(d: dict, r: dict) -> bytes:
     pdf.multi_cell(
         0, 4,
         texto_seguro(
-            "Nota normativa: Este reporte corresponde a una valoración de tamizaje automatizado basada en las ecuaciones de Framingham "
-            "(calibradas por factor 0.75 para población colombiana) y el test FINDRISC validado en Colombia, conforme a los lineamientos técnicos "
-            "de la Resolución 3280 de 2018. El paciente autorizó el tratamiento de datos conforme a la Ley 1581 de 2012."
+            "Nota normativa: Este reporte corresponde a una valoración de tamizaje automatizado de la E.S.E. Hospital San Joaquín "
+            "(Nariño, Antioquia), basada en las ecuaciones de Framingham (calibradas por factor 0.75 para población colombiana) y el test "
+            "FINDRISC validado en Colombia, conforme a los lineamientos técnicos de la Resolución 3280 de 2018. El paciente autorizó el "
+            "tratamiento de datos conforme a la Ley 1581 de 2012."
         )
     )
 
@@ -296,8 +320,15 @@ def generar_pdf_paciente(d: dict, r: dict) -> bytes:
 # ==========================================
 # 4. INTERFAZ DE USUARIO (STREAMLIT)
 # ==========================================
-st.title("❤️ Tamizaje de Riesgo Cardiovascular y Metabólico")
-st.caption("Generación de Reporte Individual en PDF según Resolución 3280 de 2018 - Ministerio de Salud y Protección Social de Colombia")
+col_logo, col_titulo = st.columns([1, 8])
+with col_logo:
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, width=95)
+with col_titulo:
+    st.title("E.S.E. Hospital San Joaquín - Nariño, Antioquia")
+    st.subheader("Tamizaje de Riesgo Cardiovascular y Metabólico (Resolución 3280 de 2018)")
+
+st.divider()
 
 tiene_lab = st.radio(
     "¿Cuenta el paciente con resultados recientes de exámenes de Colesterol (Total y HDL)?",
@@ -398,8 +429,12 @@ if boton_evaluar:
     elif not autorizacion_datos:
         st.warning("⚠️ Debe marcar la casilla de confirmación antes de generar el reporte.")
     else:
+        # Hora oficial de Colombia (UTC-5)
+        tz_colombia = timezone(timedelta(hours=-5))
+        fecha_colombia = datetime.now(tz_colombia).strftime("%Y-%m-%d %H:%M")
+
         datos_paciente = {
-            "fecha_registro": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "fecha_registro": fecha_colombia,
             "tipo_doc": tipo_doc,
             "documento": documento.strip(),
             "nombre_completo": nombre_completo.strip().upper(),
