@@ -16,7 +16,27 @@ st.set_page_config(
 LOGO_PATH = "logo.png"
 
 # ==========================================
-# 2. MOTOR DE CÁLCULO NORMATIVO (RES. 3280)
+# 2. MOTOR DE CLASIFICACIÓN DE PRESIÓN ARTERIAL
+# ==========================================
+def clasificar_presion_arterial(pas: int, pad: int) -> str:
+    """Clasifica la presión arterial según guías clínicas (AHA / ESC)."""
+    if pas < 90 or pad < 60:
+        return "Hipotensión (Baja)"
+    elif pas < 120 and pad < 80:
+        return "Óptima / Normal"
+    elif 120 <= pas <= 129 and 80 <= pad <= 84:
+        return "Normal alta"
+    elif 130 <= pas <= 139 or 85 <= pad <= 89:
+        return "Hipertensión Grado 1"
+    elif 140 <= pas <= 159 or 90 <= pad <= 99:
+        return "Hipertensión Grado 2"
+    elif pas >= 160 or pad >= 100:
+        return "Hipertensión Grado 3 (Severa)"
+    else:
+        return "Revisar valores"
+
+# ==========================================
+# 3. MOTOR DE CÁLCULO NORMATIVO (RES. 3280)
 # ==========================================
 def calcular_riesgo_colombia(d: dict) -> dict:
     # A. Cálculo de IMC
@@ -40,7 +60,6 @@ def calcular_riesgo_colombia(d: dict) -> dict:
     if 25 <= imc < 30: pts_findrisc += 1
     elif imc >= 30: pts_findrisc += 3
     
-    # Corte de perímetro abdominal para Colombia (H >= 94 cm, M >= 90 cm)
     cintura = d["perimetro_abdominal"]
     obesidad_abdominal = "No"
     if d["sexo"] == "Masculino" and cintura >= 94:
@@ -101,7 +120,7 @@ def calcular_riesgo_colombia(d: dict) -> dict:
     porcentaje_col = round((riesgo_crudo * 100) * 0.75, 2)
 
     # D. Regla de Categorización Global y Conducta RIAS
-    if d["evento_cv_o_dm_previa"] == "Sí" or pas >= 180:
+    if d["evento_cv_o_dm_previa"] == "Sí" or pas >= 180 or d["presion_diastolica"] >= 110:
         clasificacion_global = "RIESGO ALTO / MUY ALTO (Categorización Directa)"
         nivel_alerta = "ALTO"
         conducta = [
@@ -150,23 +169,21 @@ def calcular_riesgo_colombia(d: dict) -> dict:
     }
 
 # ==========================================
-# 3. GENERADOR DE REPORTE PDF CON LOGO
+# 4. GENERADOR DE REPORTE PDF CON NUEVAS VARIABLES
 # ==========================================
 def texto_seguro(texto: str) -> str:
     return str(texto).encode("latin-1", "replace").decode("latin-1")
 
-def generar_pdf_paciente(d: dict, r: dict) -> bytes:
+def generar_pdf_paciente(d: dict, r: dict, evaluacion_pa: str) -> bytes:
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # --- ENCABEZADO INSTITUCIONAL CON ESCUDO ---
-    # Fondo azul institucional (de x=10 a x=200, alto 24 mm)
+    # --- ENCABEZADO INSTITUCIONAL ---
     pdf.set_fill_color(20, 65, 115)
     pdf.rect(10, 10, 190, 24, "F")
 
     if os.path.exists(LOGO_PATH):
-        # Recuadro blanco para que el escudo resalte limpio
         pdf.set_fill_color(255, 255, 255)
         pdf.rect(12, 11.5, 21, 21, "F")
         pdf.image(LOGO_PATH, x=13, y=12, w=19, h=19)
@@ -187,37 +204,55 @@ def generar_pdf_paciente(d: dict, r: dict) -> bytes:
     pdf.set_font("Helvetica", "", 8.5)
     pdf.cell(200 - x_texto, 5, texto_seguro("Basado en la Resolución 3280 de 2018 (RIAS) - Ministerio de Salud y Protección Social de Colombia"), ln=True, align="C")
 
-    # Ubicar cursor debajo del banner
     pdf.set_y(38)
 
-    # --- 1. DATOS DEL PACIENTE ---
+    # --- 1. DATOS DE IDENTIFICACIÓN Y AFILIACIÓN ---
     pdf.set_text_color(0, 0, 0)
     pdf.set_fill_color(230, 236, 245)
     pdf.set_font("Helvetica", "B", 10.5)
-    pdf.cell(0, 7, texto_seguro("1. DATOS DE IDENTIFICACIÓN DEL PACIENTE"), ln=True, fill=True)
+    pdf.cell(0, 7, texto_seguro("1. DATOS DE IDENTIFICACIÓN Y AFILIACIÓN DEL PACIENTE"), ln=True, fill=True)
     pdf.ln(1)
 
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(35, 6, texto_seguro("Nombre Completo:"))
+    pdf.cell(32, 6, texto_seguro("Nombre Completo:"))
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(90, 6, texto_seguro(d["nombre_completo"]))
+    pdf.cell(93, 6, texto_seguro(d["nombre_completo"]))
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(30, 6, texto_seguro("Fecha Tamizaje:"))
+    pdf.cell(25, 6, texto_seguro("Fecha / Hora:"))
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 6, texto_seguro(d["fecha_registro"]), ln=True)
 
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(35, 6, texto_seguro("Identificación:"))
+    pdf.cell(32, 6, texto_seguro("Identificación:"))
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(45, 6, texto_seguro(f"{d['tipo_doc']} {d['documento']}"))
+    pdf.cell(48, 6, texto_seguro(f"{d['tipo_doc']} {d['documento']}"))
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(20, 6, texto_seguro("Edad/Sexo:"))
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(35, 6, texto_seguro(f"{d['edad']} años / {d['sexo']}"))
+    pdf.cell(25, 6, texto_seguro(f"{d['edad']} a / {d['sexo'][0]}"))
+    pdf.set_font("Helvetica", "B", 18) # Separador
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(20, 6, texto_seguro("Teléfono:"))
+    pdf.cell(16, 6, texto_seguro("Teléfono:"))
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 6, texto_seguro(d["telefono"] if d["telefono"] else "No reportado"), ln=True)
+    pdf.cell(0, 6, texto_seguro(d["telefono"] if d["telefono"] else "No reg."), ln=True)
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(32, 6, texto_seguro("Dirección:"))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(48, 6, texto_seguro(d["direccion"]))
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(20, 6, texto_seguro("Municipio:"))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(45, 6, texto_seguro(d["municipio"]))
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(12, 6, texto_seguro("EPS:"))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 6, texto_seguro(d["eps"]), ln=True)
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(32, 6, texto_seguro("Régimen en Salud:"))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 6, texto_seguro(d["regimen"]), ln=True)
     pdf.ln(3)
 
     # --- 2. PARÁMETROS BIOMÉTRICOS Y CLÍNICOS ---
@@ -229,16 +264,12 @@ def generar_pdf_paciente(d: dict, r: dict) -> bytes:
     filas_datos = [
         ("Peso / Talla", f"{d['peso_kg']} kg / {d['talla_cm']} cm", "Índice de Masa Corporal (IMC)", f"{r['imc']} kg/m2 ({r['estado_imc']})"),
         ("Perímetro Abdominal", f"{d['perimetro_abdominal']} cm", "Obesidad Abdominal (RIAS)", r["obesidad_abdominal"]),
-        ("Presión Arterial Sistólica", f"{d['presion_sistolica']} mmHg", "Toma Medicamentos HTA", d["medicamentos_hta"]),
+        ("Presión Arterial (Sist./Diast.)", f"{d['presion_sistolica']} / {d['presion_diastolica']} mmHg", "Clasificación Presión Arterial", evaluacion_pa),
+        ("Toma Medicamentos HTA", d["medicamentos_hta"], "Fumador Actual", d["fumador"]),
         ("Actividad Física (>=30m/día)", d["actividad_fisica"], "Consumo Diario Frutas/Verduras", d["frutas_verduras"]),
-        ("Fumador Actual", d["fumador"], "Histórico Azúcar Alta en Sangre", d["historico_glucosa"]),
-        ("Antecedente Familiar Diabetes", d["antecedente_familiar_dm"], "DM / ERC / Evento CV Previo", d["evento_cv_o_dm_previa"]),
+        ("Histórico Azúcar en Sangre", d["historico_glucosa"], "Antecedente Familiar Diabetes", d["antecedente_familiar_dm"]),
+        ("DM / ERC / Evento CV Previo", d["evento_cv_o_dm_previa"], "Perfil Lipídico", f"{d['colesterol_total']} / {d['colesterol_hdl']} mg/dL" if d["tiene_laboratorios"]=="Sí" else "No disponible (Cálculo por IMC)")
     ]
-
-    if d["tiene_laboratorios"] == "Sí":
-        filas_datos.append(("Colesterol Total", f"{d['colesterol_total']} mg/dL", "Colesterol HDL", f"{d['colesterol_hdl']} mg/dL"))
-    else:
-        filas_datos.append(("Perfil Lipídico", "No disponible (Cálculo por IMC)", "Método Utilizado", "Framingham por IMC x0.75"))
 
     for col1_lbl, col1_val, col2_lbl, col2_val in filas_datos:
         pdf.set_font("Helvetica", "B", 8.5)
@@ -318,7 +349,7 @@ def generar_pdf_paciente(d: dict, r: dict) -> bytes:
     return bytes(pdf.output())
 
 # ==========================================
-# 4. INTERFAZ DE USUARIO (STREAMLIT)
+# 5. INTERFAZ DE USUARIO (STREAMLIT)
 # ==========================================
 col_logo, col_titulo = st.columns([1, 8])
 with col_logo:
@@ -337,7 +368,8 @@ tiene_lab = st.radio(
 )
 
 with st.form("form_tamizaje_pdf", clear_on_submit=False):
-    st.subheader("1. Datos de Identificación del Paciente")
+    st.subheader("1. Datos de Identificación y Afiliación del Paciente")
+    
     col_id1, col_id2, col_id3, col_id4 = st.columns(4)
     with col_id1:
         tipo_doc = st.selectbox("Tipo de Documento", ["CC", "TI", "CE", "PA", "PPT"])
@@ -348,9 +380,20 @@ with st.form("form_tamizaje_pdf", clear_on_submit=False):
     with col_id4:
         telefono = st.text_input("Teléfono / Celular")
 
+    col_dir1, col_dir2, col_dir3, col_dir4 = st.columns(4)
+    with col_dir1:
+        direccion = st.text_input("Dirección de Residencia")
+    with col_dir2:
+        municipio = st.text_input("Municipio", value="Nariño")
+    with col_dir3:
+        eps = st.text_input("EPS / EAPB")
+    with col_dir4:
+        regimen = st.selectbox("Régimen en Salud", ["Subsidiado", "Contributivo", "Especial / Excepción", "Población Pobre No Asegurada"])
+
     st.divider()
-    st.subheader("2. Datos Biométricos y Antropométricos")
-    col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
+    st.subheader("2. Datos Biométricos, Antropométricos y Presión Arterial")
+    
+    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
     with col_b1:
         sexo = st.selectbox("Sexo biológico", ["Femenino", "Masculino"])
     with col_b2:
@@ -358,9 +401,15 @@ with st.form("form_tamizaje_pdf", clear_on_submit=False):
     with col_b3:
         peso_kg = st.number_input("Peso (kg)", min_value=30.0, max_value=220.0, value=70.0, step=0.5)
     with col_b4:
-        talla_cm = st.number_input("Estatura / Talla (cm)", min_value=120.0, max_value=220.0, value=165.0, step=1.0)
+        talla_cm = st.number_input("Talla (cm)", min_value=120.0, max_value=220.0, value=165.0, step=1.0)
+
+    col_b5, col_b6, col_b7 = st.columns(3)
     with col_b5:
         perimetro_abdominal = st.number_input("Perímetro Abdominal / Cintura (cm)", min_value=50.0, max_value=180.0, value=88.0, step=1.0)
+    with col_b6:
+        presion_sistolica = st.number_input("Presión Sistólica (mmHg) - Máxima", min_value=60, max_value=260, value=120, step=1)
+    with col_b7:
+        presion_diastolica = st.number_input("Presión Diastólica (mmHg) - Mínima", min_value=40, max_value=160, value=80, step=1)
 
     st.divider()
     st.subheader("3. Cuestionario de Hábitos y Antecedentes (FINDRISC & Framingham)")
@@ -396,10 +445,6 @@ with st.form("form_tamizaje_pdf", clear_on_submit=False):
             "¿Ya tiene diagnóstico médico confirmado de Diabetes, Enfermedad Renal Crónica, o ha sufrido un Infarto / ACV?",
             ["No", "Sí"]
         )
-        presion_sistolica = st.number_input(
-            "Presión Arterial Sistólica (mmHg). Si no la conoce, deje 120:",
-            min_value=80, max_value=240, value=120, step=1
-        )
 
     if tiene_lab == "Sí":
         st.divider()
@@ -421,7 +466,7 @@ with st.form("form_tamizaje_pdf", clear_on_submit=False):
     boton_evaluar = st.form_submit_button("🔍 Calcular Riesgo Cardiovascular y Generar PDF", use_container_width=True)
 
 # ==========================================
-# 5. PROCESAMIENTO Y BOTÓN DE DESCARGA PDF
+# 6. PROCESAMIENTO Y BOTÓN DE DESCARGA PDF
 # ==========================================
 if boton_evaluar:
     if not documento.strip() or not nombre_completo.strip():
@@ -429,7 +474,6 @@ if boton_evaluar:
     elif not autorizacion_datos:
         st.warning("⚠️ Debe marcar la casilla de confirmación antes de generar el reporte.")
     else:
-        # Hora oficial de Colombia (UTC-5)
         tz_colombia = timezone(timedelta(hours=-5))
         fecha_colombia = datetime.now(tz_colombia).strftime("%Y-%m-%d %H:%M")
 
@@ -439,6 +483,10 @@ if boton_evaluar:
             "documento": documento.strip(),
             "nombre_completo": nombre_completo.strip().upper(),
             "telefono": telefono.strip(),
+            "direccion": direccion.strip() if direccion.strip() else "No reportada",
+            "municipio": municipio.strip() if municipio.strip() else "Nariño",
+            "eps": eps.strip() if eps.strip() else "No reportada",
+            "regimen": regimen,
             "sexo": sexo,
             "edad": edad,
             "peso_kg": peso_kg,
@@ -452,23 +500,38 @@ if boton_evaluar:
             "fumador": fumador,
             "evento_cv_o_dm_previa": evento_cv_o_dm_previa,
             "presion_sistolica": presion_sistolica,
+            "presion_diastolica": presion_diastolica,
             "tiene_laboratorios": tiene_lab,
             "colesterol_total": colesterol_total,
             "colesterol_hdl": colesterol_hdl
         }
 
+        evaluacion_pa = clasificar_presion_arterial(presion_sistolica, presion_diastolica)
         resultados = calcular_riesgo_colombia(datos_paciente)
-        pdf_bytes = generar_pdf_paciente(datos_paciente, resultados)
+        pdf_bytes = generar_pdf_paciente(datos_paciente, resultados, evaluacion_pa)
 
         st.session_state["ultimo_resultado"] = resultados
         st.session_state["ultimo_pdf"] = pdf_bytes
+        st.session_state["evaluacion_pa"] = evaluacion_pa
+        st.session_state["datos_paciente_actual"] = datos_paciente
         nombre_limpio = datos_paciente["nombre_completo"].replace(" ", "_")
         st.session_state["nombre_archivo"] = f"Reporte_RCV_{tipo_doc}_{documento.strip()}_{nombre_limpio}.pdf"
 
 if "ultimo_resultado" in st.session_state:
     res = st.session_state["ultimo_resultado"]
+    eval_pa = st.session_state["evaluacion_pa"]
+    dp = st.session_state["datos_paciente_actual"]
+
     st.divider()
     st.markdown("### 📋 Resultados de la Clasificación Normativa")
+
+    # Alerta visual para Presión Arterial
+    if "Hipertensión" in eval_pa:
+        st.warning(evaluacion_pa_msg := f"⚠️ **Presión Arterial ({dp['presion_sistolica']}/{dp['presion_diastolica']} mmHg): {eval_pa}**")
+    elif "Hipotensión" in eval_pa:
+        st.info(f"ℹ️ **Presión Arterial ({dp['presion_sistolica']}/{dp['presion_diastolica']} mmHg): {eval_pa}**")
+    else:
+        st.success(f"✅ **Presión Arterial ({dp['presion_sistolica']}/{dp['presion_diastolica']} mmHg): {eval_pa}**")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("IMC Calculado", f"{res['imc']} kg/m²", res["estado_imc"], delta_color="off")
